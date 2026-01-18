@@ -1,8 +1,0 @@
-##########################################
-1) run 1_st_script.tcl in consol, this step will extract all device top right and bottom left corner, make sure to edit the output file path
-2)run metal_2_script.tcl this will place metal 2 layer
-3) select all nets and run via12_gonna_work.tcl
-4) place vias on both taps and run metal_2_location.tcl this will return all metal 2 layers with their assigned net names
-5) run m3_script.tcl
-6)run via23_gonna_work.tcl
-7)place pins manually
