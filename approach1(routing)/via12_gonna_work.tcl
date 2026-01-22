@@ -1,6 +1,11 @@
 ########################################################################
 # m2_grid_dynamic_autovia_seed_from_report_FULL_FIXED6.tcl
 # FIX: If trial via causes strap net to match usedNets, delete/recreate strap and continue
+# this script works by placing a CreatVia at the start of circuit, starting from the right edge of the cicruit,
+# the CreatVia will increment by 0.074 in the left direction of X-axis to cover the whole metal strap, it will comapre the name of the net to the previous 2 nets
+# if it didn't find any unique nets, it will remove the metal strap entirley
+#the m2_grid_report.txt is used to find the top right corner, which indicates the start of a new row, it will also be used to indicate the strating point of each via12 exactly
+#after a CreatVia12 finds a unique net, it is removed and then AutoVia are placed to remove the headache of DRC violations
 ########################################################################
 
 # ----------------------------
