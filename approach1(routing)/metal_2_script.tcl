@@ -31,10 +31,10 @@ set xInset      0.101
 set endOffset   0.100
 
 # FIRST approach offsets (use when probe RETURNS a net)
-set FIRST_OFFSETS  [list 0.116 0.190 0.253 0.396 0.462 0.532]
+set FIRST_OFFSETS  [list 0.116 0.190 0.253 0.391 0.449 0.510]
 
 # SECOND approach offsets (use when probe returns NO net)
-set SECOND_OFFSETS [list 0.050 0.110 0.170 0.309 0.377 0.458]
+set SECOND_OFFSETS [list 0.059 0.118 0.178 0.309 0.377 0.458]
 
 # Probe config (3rd strap => index 2)
 set PROBE_OFFSET_IDX 2
@@ -275,5 +275,6 @@ proc run_place_m2_grid_perCorner_probe3rdStrap_reportLikeOld {} {
 }
 
 run_place_m2_grid_perCorner_probe3rdStrap_reportLikeOld
+
 
 

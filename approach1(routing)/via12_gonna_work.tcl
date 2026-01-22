@@ -12,7 +12,7 @@ set LPP_M2 {M2 drawing}
 
 # Trial probe via (createVia)
 set VIA_DEF_NAME "VIA12"
-set VIA_ORIENT   "R90"
+set VIA_ORIENT   "R0"
 set VIA_PARAMS   {}          ;# e.g. {{cutRows 10} {cutColumns 10}}
 
 # APPROACH mapping
@@ -440,3 +440,4 @@ proc run_m2_grid_dynamic_autovia {} {
 
 # Run
 run_m2_grid_dynamic_autovia
+
