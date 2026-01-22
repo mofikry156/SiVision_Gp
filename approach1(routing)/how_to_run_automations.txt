@@ -1,0 +1,13 @@
+##################################################
+HOW TO RUN THE AUTOMATION SCRIPT
+##################################################
+1) run 1_st_script.tcl
+this will give you coordinates of all active devices in your current layout 
+2)run metal_2_script.tcl this will place the metal 2 layer, two approaches are used in this script 1'st approach which is the placement when devices are placed in rotation 0
+and the other is when devices are placed in rotation 180, script is smart enough to detect orientation
+3)run via12_gonna_work.tcl to place via12, make sure to select all nets while running your script 
+4)run metal_2_location.tcl, run this script after placing vias on taps and naming the nets, this script will give a report output with metal 2 locations and their net names
+5)run m3_script.tcl , run this to place metal 3 layers, this script will place metal 3 also it is smart enough to place the i/o of the ota to nearest corner 
+if that wont make any drc violations
+6)run via23_gonna_work.tcl , this will place via23 
+7) place your pins
