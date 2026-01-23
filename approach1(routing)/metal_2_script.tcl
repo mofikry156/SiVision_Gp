@@ -61,7 +61,7 @@ set PROBE_X_FROM_RIGHT 0.03
 
 # Via config
 set VIA_DEF_NAME "VIA12"
-set VIA_ORIENT   R90
+set VIA_ORIENT   R0
 
 # LPP
 set LPP_M2 {M2 drawing}
