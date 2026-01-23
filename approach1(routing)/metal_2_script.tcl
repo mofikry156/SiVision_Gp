@@ -57,7 +57,7 @@ set A2_XINSETS [list 0.0 0.148 0.222 0.0 0.222 0.296]
 
 # Probe config (3rd strap => index 2)
 set PROBE_OFFSET_IDX 2
-set PROBE_X_FROM_RIGHT 0.009
+set PROBE_X_FROM_RIGHT 0.03
 
 # Via config
 set VIA_DEF_NAME "VIA12"
