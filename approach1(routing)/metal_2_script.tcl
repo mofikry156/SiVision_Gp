@@ -49,11 +49,11 @@ set SECOND_OFFSETS [list 0.059 0.118 0.178 0.309 0.377 0.458]
 # NEW: X inset per strap index (0..5)
 # ----------------------------
 # Approach1: reference is strap0 (first) => inset[0]=0
-#   2nd:0.200  3rd:0.271  4th:0  5th:0.172  6th:0.241
-set A1_XINSETS [list 0.0 0.222 0.296 0.0 0.148 0.222] #refrence here is the first strap
+# refrence here is the first strap
+set A1_XINSETS [list 0.0 0.222 0.296 0.0 0.148 0.222] 
 
-# Approach2: reference is LAST strap => mirrored list (strap5 inset=0)
-set A2_XINSETS [list 0.0 0.148 0.222 0.0 0.222 0.296] #refrence here is the 4th strap
+# refrence here is the 4th strap
+set A2_XINSETS [list 0.0 0.148 0.222 0.0 0.222 0.296] 
 
 # Probe config (3rd strap => index 2)
 set PROBE_OFFSET_IDX 2
