@@ -76,7 +76,7 @@ proc _safeDestroy {obj} {
     if {$obj eq ""} { return }
     catch { db::destroy $obj }
     catch { le::delete  $obj }
-} #this proc is not currently in use
+} 
 
 proc deleteFig {fig} {
     #if {$fig eq ""} { return }
