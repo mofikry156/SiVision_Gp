@@ -79,9 +79,9 @@ proc _safeDestroy {obj} {
 } #this proc is not currently in use
 
 proc deleteFig {fig} {
-    if {$fig eq ""} { return }
-    if {[llength [info commands db::isObject]] && ![db::isObject $fig]} { return }
-    catch { db::destroy $fig }
+    #if {$fig eq ""} { return }
+    #if {[llength [info commands db::isObject]] && ![db::isObject $fig]} { return }
+    #catch { db::destroy $fig }
     catch { le::delete $fig }
 }
 
