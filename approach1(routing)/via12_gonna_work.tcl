@@ -33,7 +33,7 @@ set STEP_X         0.074
 set MAX_SEED_TRIES 3000
 
 # autoVia capture box around each (x,yc)
-set AUTOVIA_BOX_W  0.034
+set AUTOVIA_BOX_W  0.020
 set AUTOVIA_BOX_H  0.020
 
 # ----------------------------
@@ -51,23 +51,9 @@ proc _isNumber {s} {
 
 proc _tryGetNetName {obj} {
   if {$obj eq ""} { return "" }
-  foreach expr {
-    {db::getAttr net.name -of $obj}
-    {db::getAttr netName  -of $obj}
-    {db::getAttr net      -of $obj}
-  } {
-    set v ""
-    if {![catch {set v [eval $expr]}]} {
-      if {$v eq ""} { continue }
-      if {[string match "oa:*" $v]} {
-        set nm ""
-        if {![catch {set nm [db::getAttr name -of $v]}]} {
-          if {$nm ne ""} { return $nm }
-        }
-      } else {
-        return $v
-      }
-    }
+  set nm ""
+  if {![catch { set nm [db::getAttr net.name -of $obj] }]} {
+    return $nm
   }
   return ""
 }
@@ -75,16 +61,23 @@ proc _tryGetNetName {obj} {
 proc _createViaPointOrient {design pt viaDefName orient params} {
   set v ""
   if {$params eq ""} {
-    if {[catch { set v [le::createVia -design $design -definition $viaDefName -origin $pt -orient $orient] } err]} {
+    if {[catch { set v [le::createVia -design $design -definition $viaDefName -origin $pt -orient $orient] }]} {
       return ""
     }
   } else {
-    if {[catch { set v [le::createVia -design $design -definition $viaDefName -origin $pt -orient $orient -params $params] } err]} {
+    if {[catch { set v [le::createVia -design $design -definition $viaDefName -origin $pt -orient $orient -params $params] }]} {
       return ""
     }
   }
   return $v
 }
+
+proc _recreateStrap {oldObj} {
+  if {$oldObj eq ""} { return "" }
+  catch { db::setAttr net -of $oldObj -value {} }
+  return $oldObj
+}
+
 
 proc _ptToBox {x y w h} {
   set x1 [expr {$x - $w/2.0}]
@@ -95,32 +88,25 @@ proc _ptToBox {x y w h} {
 }
 
 proc _autoViaBox {design box netFilter} {
-  set v ""
-  if {[catch {
+  
     set v [le::autoVia -box $box -design $design \
       -nets $netFilter \
       -sameNetOnly true \
       -createMetalShape false \
       -allowStackedVia true \
       -fitToOverlappedArea true]
-  } err]} {
-    return ""
-  }
+  
   return $v
 }
 
 proc _autoViaPoint {design pt netFilter} {
-  set v ""
-  if {[catch {
+ 
     set v [le::autoVia -point $pt -design $design \
       -nets $netFilter \
       -sameNetOnly true \
       -createMetalShape false \
       -allowStackedVia true \
       -fitToOverlappedArea true]
-  } err]} {
-    return ""
-  }
   return $v
 }
 
@@ -141,17 +127,6 @@ proc _findStrapRectByBBox {design lpp xll yll xur yur} {
   return ""
 }
 
-# NEW: Recreate strap to reset its net
-proc _recreateStrap {design lpp xll yll xur yur oldObj} {
-  _safeDestroy $oldObj
-  set box [list [list $xll $yll] [list $xur $yur]]
-  set newObj ""
-  if {[catch { set newObj [le::createRectangle $box -design $design -lpp $lpp] } err]} {
-    puts "WARN: failed to recreate strap rect BB=($xll $yll)-($xur $yur) err=$err"
-    return ""
-  }
-  return $newObj
-}
 
 # NEW: Get net from strap object
 proc _getStrapNet {strapObj} {
@@ -159,7 +134,7 @@ proc _getStrapNet {strapObj} {
   return [_tryGetNetName $strapObj]
 }
 
-# ----------------------------
+#  
 # REPORT PARSER
 # ----------------------------
 proc _parseReportByRow {fname} {
@@ -283,7 +258,7 @@ proc _findUniqueSeedOnStrap {design strapDict approach groupName usedNets strapO
       if {$strapNet ne "" && [lsearch -exact $usedNets $strapNet] != -1} {
         # STRAP GOT CONTAMINATED! Delete and recreate it
         puts "    CONTAMINATION: Trial via at X=$x caused strap to get net '$strapNet' (already used)"
-        set strapObj [_recreateStrap $design $::LPP_M2 $xll $yll $xur $yur $strapObj]
+        set strapObj [_recreateStrap $strapObj]
         if {$strapObj eq ""} {
           return [list FAIL "" ""]
         }
@@ -444,4 +419,3 @@ proc run_m2_grid_dynamic_autovia {} {
 
 # Run
 run_m2_grid_dynamic_autovia
-

@@ -1,0 +1,23 @@
+*Custom Compiler Version V-2023.12-6
+*Sat Jan 31 00:01:34 2026
+
+*.SCALE METER
+*.LDD
+.GLOBAL gnd! vdd!
+********************************************************************************
+* Library          : trylast1
+* Cell             : ota_101
+* View             : schematic
+* View Search List : auCdl schematic
+* View Stop List   : auCdl
+********************************************************************************
+.subckt ota_101 gnd! in1 in2 out vb vdd!
+*.PININFO gnd!:I in1:I in2:I out:O vb:I vdd!:I
+MM2 net17 net17 vdd! vdd! p08 l=0.014u nf=32 m=16 nfin=2
+MM3 out net17 vdd! vdd! p08 l=0.014u nf=32 m=16 nfin=2
+MM6 net23 vb gnd! gnd! n08 l=0.014u nf=32 m=16 nfin=2
+MM5 out in2 net23 gnd! n08 l=0.014u nf=64 m=32 nfin=2
+MM4 net17 in1 net23 gnd! n08 l=0.014u nf=64 m=32 nfin=2
+.ends ota_101
+
+

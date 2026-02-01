@@ -72,30 +72,10 @@ set LPP_M2 {M2 drawing}
 proc isNumber {s} { return [regexp {^[+-]?([0-9]+(\.[0-9]*)?|\.[0-9]+)$} $s] }
 proc quantKey {y tol} { return [expr {round($y / $tol) * $tol}] }
 
-proc _safeDestroy {obj} {
-    if {$obj eq ""} { return }
-    catch { db::destroy $obj }
-    catch { le::delete  $obj }
-} 
 
 proc deleteFig {fig} {
-    #if {$fig eq ""} { return }
-    #if {[llength [info commands db::isObject]] && ![db::isObject $fig]} { return }
-    #catch { db::destroy $fig }
-    catch { le::delete $fig }
-}
 
-proc resolveM2LPP {design} {
-    set candidates [list {M2 drawing} "M2 drawing" "M2:drawing" "M2"]
-    foreach lpp $candidates {
-        set testBox [list [list 0 0] [list 0.001 0.001]]
-        set fig ""
-        if {![catch { set fig [le::createRectangle $testBox -design $design -lpp $lpp] }]} {
-            deleteFig $fig
-            return $lpp
-        }
-    }
-    error "Could not resolve M2 LPP. Add your PDK layer name to candidates."
+    catch { le::delete $fig }
 }
 
 proc createM2Strap {design lpp x0 y0 x1 y1} {
@@ -115,13 +95,6 @@ proc tryGetNetName {obj} {
     return $nm
 }
 
-proc sanityViaDef {design viaDefName} {
-    set t ""
-    if {[catch { set t [le::createVia -design $design -definition $viaDefName -origin {0 0} -orient R0] } err]} {
-        error "VIA_DEF_NAME '$viaDefName' invalid in your tech: $err"
-    }
-    deleteFig $t
-}
 
 # NEW: compute x-span for a strap index (j) based on approach
 proc strapXSpan {approach j x0base x1base} {
@@ -209,8 +182,8 @@ proc run_place_m2_grid_perCorner_probe3rdStrap_reportLikeOld {} {
         error "Input file not found: $::inFile"
     }
 
-    sanityViaDef $design $::VIA_DEF_NAME
-    set lppM2 [resolveM2LPP $design]
+    
+    set lppM2 {M2 drawing}
 
     lassign [parseDeviceFile $::inFile $::rowTol] otaLLX otaLLY otaURX otaURY rowMap good bad
     array set rowTopY $rowMap
