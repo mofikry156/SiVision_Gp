@@ -1,421 +1,188 @@
-########################################################################
-# m2_grid_dynamic_autovia_seed_from_report_FULL_FIXED6.tcl
-# FIX: If trial via causes strap net to match usedNets, delete/recreate strap and continue
-# this script works by placing a CreatVia at the start of circuit, starting from the right edge of the cicruit,
-# the CreatVia will increment by 0.074 in the left direction of X-axis to cover the whole metal strap, it will comapre the name of the net to the previous 2 nets
-# if it didn't find any unique nets, it will remove the metal strap entirley
-#the m2_grid_report.txt is used to find the top right corner, which indicates the start of a new row, it will also be used to indicate the #strating point of each via12 exactly
-#after a CreatVia12 finds a unique net, it is removed and then AutoVia are placed to remove the headache of DRC violations
-########################################################################
-# ----------------------------
-# USER SETTINGS
-# ----------------------------
-set REPORT_FILE "/home/users/svgplayout2601mofikry/gonna_work/m2_grid_report.txt"
+set design [ed]
+set lpp {M2 drawing}
+set VIA12_DEF "VIA12"
+set top3_a1 0.03
+set bot3_a1 0.067
+set top3_a2 0.067
+set bot_3_a2 0.03
+set filepath "/home/users/svgplayout2601mofikry/gonna_work/1st_script_op.txt"
 
-set LPP_M2 {M2 drawing}
 
-# Trial probe via (createVia)
-set VIA_DEF_NAME "VIA12"
-set VIA_ORIENT   "R0"
-set VIA_PARAMS   {}          ;# e.g. {{cutRows 10} {cutColumns 10}}
+proc _getShapesBbox {lpp} {
+set m2_shapes_all [db::getShapes -of [ed] -lpp $lpp -filter {%type=="Rect"}]
+set Bbox {}
+db::foreach shape $m2_shapes_all {
 
-# APPROACH mapping
-set XFR_A1_TOP3  0.030
-set XFR_A1_BOT3  0.067
-set XFR_A2_TOP3  0.067
-set XFR_A2_BOT3  0.030
-
-# Left boundary offset from left edge of strap
-set X_FROM_LEFT  0.02
-
-# Seed stepping
-set STEP_X         0.074
-set MAX_SEED_TRIES 3000
-
-# autoVia capture box around each (x,yc)
-set AUTOVIA_BOX_W  0.020
-set AUTOVIA_BOX_H  0.020
-
-# ----------------------------
-# HELPERS
-# ----------------------------
-proc _safeDestroy {obj} {
-  if {$obj eq ""} { return }
-  catch { db::destroy $obj }
-  catch { le::delete $obj }
+set Bbox_of_metal [db::getAttr bBox -of $shape]
+lappend Bbox [list $shape $Bbox_of_metal]
+}
+set sortedBbox [lsort -index {1 1 1} -decreasing -real $Bbox]
+return $sortedBbox
 }
 
-proc _isNumber {s} {
-  return [regexp {^[+-]?([0-9]+(\.[0-9]*)?|\.[0-9]+)$} $s]
-}
 
-proc _tryGetNetName {obj} {
-  if {$obj eq ""} { return "" }
-  set nm ""
-  if {![catch { set nm [db::getAttr net.name -of $obj] }]} {
-    return $nm
-  }
-  return ""
-}
-
-proc _createViaPointOrient {design pt viaDefName orient params} {
-  set v ""
-  if {$params eq ""} {
-    if {[catch { set v [le::createVia -design $design -definition $viaDefName -origin $pt -orient $orient] }]} {
-      return ""
+proc _sortedMetals {sortedBbox} {
+    set sorted {}
+    foreach k $sortedBbox {
+        set y1   [lindex $k 1 0 1]
+        set y2   [lindex $k 1 1 1]
+        set avg  [expr {($y1 + $y2)/2.0}]
+        set x_ur [lindex $k 1 1 0]
+        set x_ll [lindex $k 1 0 0]
+        set obj  [lindex $k 0]
+        lappend sorted [list $obj $x_ur $avg $x_ll]
     }
-  } else {
-    if {[catch { set v [le::createVia -design $design -definition $viaDefName -origin $pt -orient $orient -params $params] }]} {
-      return ""
+    return $sorted
+}
+
+proc _sortedRows {filepath} {
+    set fh [open $filepath r]
+    set uniq [dict create]   ;# acts like a set: key = Y value
+
+    while {[gets $fh line] >= 0} {
+        set line [string trim $line]
+        if {$line eq ""} continue
+
+        ;# skip comments and header-ish lines
+        if {[string match "#*" $line]} continue
+        if {[string match "INST_NAME*" $line]} continue
+
+        ;# split by whitespace
+        set cols [regexp -all -inline {\S+} $line]
+
+        ;# need at least 7 columns:
+        ;# 0:INST_NAME 1:ORIGIN_X 2:ORIGIN_Y 3:BBOX_LL_X 4:BBOX_LL_Y 5:BBOX_UR_X 6:BBOX_UR_Y
+        if {[llength $cols] < 7} continue
+
+        set ur_y [lindex $cols 6]
+
+        ;# keep only numeric values (handles -2.423, 1.953, etc.)
+        if {![string is double -strict $ur_y]} continue
+
+        dict set uniq $ur_y 1
     }
-  }
-  return $v
+    close $fh
+
+    ;# unique keys, numeric sort, decreasing
+    set ys [dict keys $uniq]
+    return [lsort -real -decreasing $ys]
 }
 
-proc _recreateStrap {oldObj} {
-  if {$oldObj eq ""} { return "" }
-  catch { db::setAttr net -of $oldObj -value {} }
-  return $oldObj
-}
+proc _createVia_search {rows sortedMetals VIA12_DEF} {
+    set top3_a1  $::top3_a1
+    set bot3_a1  $::bot3_a1
+    set top3_a2  $::top3_a2
+    set bot3_a2  $::bot_3_a2
 
+    # Optional: skip first/last
+    set rows        [lrange $rows 1 end-1]
+    set sortedMetals [lrange $sortedMetals 1 end-1]
 
-proc _ptToBox {x y w h} {
-  set x1 [expr {$x - $w/2.0}]
-  set x2 [expr {$x + $w/2.0}]
-  set y1 [expr {$y - $h/2.0}]
-  set y2 [expr {$y + $h/2.0}]
-  return [list [list $x1 $y1] [list $x2 $y2]]
-}
+    set metal_idx 0
+    set total [llength $sortedMetals]
 
-proc _autoViaBox {design box netFilter} {
-  
-    set v [le::autoVia -box $box -design $design \
-      -nets $netFilter \
-      -sameNetOnly true \
-      -createMetalShape false \
-      -allowStackedVia true \
-      -fitToOverlappedArea true]
-  
-  return $v
-}
+    foreach row $rows {
+        if {$metal_idx >= $total} break
 
-proc _autoViaPoint {design pt netFilter} {
- 
-    set v [le::autoVia -point $pt -design $design \
-      -nets $netFilter \
-      -sameNetOnly true \
-      -createMetalShape false \
-      -allowStackedVia true \
-      -fitToOverlappedArea true]
-  return $v
-}
+        # ---------------------------
+        # Decide offsets ONCE per row
+        # ---------------------------
+        set probeRec [lindex $sortedMetals $metal_idx]
+        set probeXur [lindex $probeRec 1]
+        set probeY   [lindex $probeRec 2]
 
-proc _findStrapRectByBBox {design lpp xll yll xur yur} {
-  set tol 0.0005
-  set sh [db::getShapes -of $design -lpp $lpp -filter {%type=="Rect"}]
-  db::foreach s $sh {
-    set bb ""
-    if {[catch {set bb [db::getAttr bBox -of $s]}]} { continue }
-    set llx [lindex [lindex $bb 0] 0]
-    set lly [lindex [lindex $bb 0] 1]
-    set urx [lindex [lindex $bb 1] 0]
-    set ury [lindex [lindex $bb 1] 1]
-    if {abs($llx-$xll) < $tol && abs($lly-$yll) < $tol && abs($urx-$xur) < $tol && abs($ury-$yur) < $tol} {
-      return $s
-    }
-  }
-  return ""
-}
+        # Create a TEMP via at (x_ur - 0.03, y) with R90, read its net, delete it
+        set probeX [expr {$probeXur - 0.03}]
+        set probeV [le::createVia -design [ed] -definition $VIA12_DEF -origin [list $probeX $probeY] -orient R90]
 
-
-# NEW: Get net from strap object
-proc _getStrapNet {strapObj} {
-  if {$strapObj eq ""} { return "" }
-  return [_tryGetNetName $strapObj]
-}
-
-#  
-# REPORT PARSER
-# ----------------------------
-proc _parseReportByRow {fname} {
-  if {![file exists $fname]} { error "REPORT_FILE not found: $fname" }
-
-  array set rowApproach {}
-  array set rowStraps {}
-
-  set fp [open $fname r]
-  while {[gets $fp line] >= 0} {
-    set raw $line
-    set line [string trim $line]
-    if {$line eq ""} continue
-
-    # If comment, still try to parse approach headers from it
-    if {[string match "#*" $line]} {
-      if {[regexp {ROW\s+([0-9]+)/[0-9]+\s+TOP=([-\d\.]+)\s+APPROACH=([A-Z0-9_]+)} $line -> ridx topVal appr]} {
-        set rowApproach($ridx) $appr
-      } elseif {[regexp {ROW\s+([0-9]+)/[0-9]+\s+TOP=([-\d\.]+)\s+(APPROACH[0-9]+)} $line -> ridx topVal appr2]} {
-        set rowApproach($ridx) $appr2
-      }
-      continue
-    }
-
-    # Non-comment header forms
-    if {[regexp {^ROW\s+([0-9]+)/[0-9]+\s+TOP=([-\d\.]+)\s+APPROACH=([A-Z0-9_]+)} $line -> ridx topVal appr]} {
-      set rowApproach($ridx) $appr
-      continue
-    }
-    if {[regexp {^ROW\s+([0-9]+)/[0-9]+\s+TOP=([-\d\.]+)\s+(APPROACH[0-9]+)} $line -> ridx topVal appr2]} {
-      set rowApproach($ridx) $appr2
-      continue
-    }
-
-    # Strap line
-    if {[regexp {^ROW\s+([0-9]+)/[0-9]+\s+TOP=([-\d\.]+)\s+off=([-\d\.]+)\s+Yc=([-\d\.]+)\s+BB=\(([-\d\.]+)\s+([-\d\.]+)\)-\(([-\d\.]+)\s+([-\d\.]+)\)} \
-         $line -> ridx topVal offVal yc xll yll xur yur]} {
-
-      foreach v [list $topVal $offVal $yc $xll $yll $xur $yur] {
-        if {$v eq "" || ![_isNumber $v]} {
-          puts "WARN: Skipping malformed strap line: $raw"
-          continue 2
+        set hasNet 0
+        set probeNetObj ""
+        if {![catch {set probeNetObj [db::getAttr net -of $probeV]}]} {
+            if {$probeNetObj ne ""} { set hasNet 1 }
         }
-      }
+        catch {db::destroy $probeV}   ;# ALWAYS remove probe via
 
-      set strap [dict create \
-        row $ridx top $topVal off $offVal yc $yc \
-        xll $xll yll $yll xur $xur yur $yur \
-      ]
-      if {![info exists rowStraps($ridx)]} { set rowStraps($ridx) {} }
-      lappend rowStraps($ridx) $strap
-      continue
-    }
-  }
-  close $fp
-
-  return [list [array get rowApproach] [array get rowStraps]]
-}
-
-proc _sortStrapsByOffAsc {strapList} {
-  set tmp {}
-  foreach s $strapList {
-    set off [dict get $s off]
-    lappend tmp [list $off $s]
-  }
-  set tmp [lsort -real -increasing -index 0 $tmp]
-  set out {}
-  foreach pair $tmp { lappend out [lindex $pair 1] }
-  return $out
-}
-
-proc _getXFromRightForGroup {approach groupName} {
-  if {$approach eq "APPROACH2"} {
-    if {$groupName eq "TOP3"} { return $::XFR_A2_TOP3 }
-    return $::XFR_A2_BOT3
-  }
-  if {$groupName eq "TOP3"} { return $::XFR_A1_TOP3 }
-  return $::XFR_A1_BOT3
-}
-
-# ----------------------------
-# MODIFIED: Find unique seed with strap recreation logic
-# ----------------------------
-proc _findUniqueSeedOnStrap {design strapDict approach groupName usedNets strapObjVar} {
-  upvar $strapObjVar strapObj
-  
-  set xll [dict get $strapDict xll]
-  set yll [dict get $strapDict yll]
-  set xur [dict get $strapDict xur]
-  set yur [dict get $strapDict yur]
-  set yc  [dict get $strapDict yc]
-
-  set xFromRight [_getXFromRightForGroup $approach $groupName]
-  set xStart [expr {$xur - $xFromRight}]
-  set xStop  [expr {$xll + $::X_FROM_LEFT}]
-  if {$xStart <= $xStop} {
-    return [list FAIL "" ""]
-  }
-
-  set tries 0
-  for {set x $xStart} {$x >= $xStop} {set x [expr {$x - $::STEP_X}]} {
-    incr tries
-    if {$tries > $::MAX_SEED_TRIES} { break }
-
-    set pt [list $x $yc]
-    
-    # Place trial via
-    set vTrial [_createViaPointOrient $design $pt $::VIA_DEF_NAME $::VIA_ORIENT $::VIA_PARAMS]
-    if {$vTrial eq ""} { continue }
-
-    set viaNet [_tryGetNetName $vTrial]
-    _safeDestroy $vTrial
-    
-    if {$viaNet eq ""} { continue }
-
-    # Check if via net is already used in group
-    if {[lsearch -exact $usedNets $viaNet] != -1} { 
-      # Via net already used, but check if strap got contaminated
-      set strapNet [_getStrapNet $strapObj]
-      
-      if {$strapNet ne "" && [lsearch -exact $usedNets $strapNet] != -1} {
-        # STRAP GOT CONTAMINATED! Delete and recreate it
-        puts "    CONTAMINATION: Trial via at X=$x caused strap to get net '$strapNet' (already used)"
-        set strapObj [_recreateStrap $strapObj]
-        if {$strapObj eq ""} {
-          return [list FAIL "" ""]
-        }
-        puts "    RECREATED: Strap reset, continuing search..."
-      }
-      continue
-    }
-
-    # Found unique net - this is our seed
-    return [list OK $viaNet $x]
-  }
-
-  return [list FAIL "" ""]
-}
-
-proc _placeAutoViasAlongStrap {design strapDict seedX seedNet} {
-  set xll [dict get $strapDict xll]
-  set yc  [dict get $strapDict yc]
-  set xStop [expr {$xll + $::X_FROM_LEFT}]
-
-  set count 0
-  set viaCount 0
-  
-  # Place seed via first
-  set seedVia [_autoViaPoint $design [list $seedX $yc] $seedNet]
-  if {$seedVia ne ""} {
-    incr viaCount
-  }
-  
-  # Fill remaining locations
-  for {set x [expr {$seedX - $::STEP_X}]} {$x >= $xStop} {set x [expr {$x - $::STEP_X}]} {
-    set box [_ptToBox $x $yc $::AUTOVIA_BOX_W $::AUTOVIA_BOX_H]
-    set result [_autoViaBox $design $box $seedNet]
-    if {$result ne ""} {
-      incr viaCount
-    }
-    incr count
-  }
-  puts "    autoVia: attempts=$count placed=$viaCount (seedX=$seedX yc=$yc net=$seedNet)"
-}
-
-# ----------------------------
-# MAIN
-# ----------------------------
-proc run_m2_grid_dynamic_autovia {} {
-  set ctx    [de::getActiveContext]
-  set design [db::getAttr editDesign -of $ctx]
-
-  if {$design eq ""} { error "No edit design found." }
-
-  # sanity check via def exists
-  set _t ""
-  if {[catch {set _t [le::createVia -design $design -definition $::VIA_DEF_NAME -origin {0 0} -orient $::VIA_ORIENT]} err]} {
-    error "VIA_DEF_NAME '$::VIA_DEF_NAME' invalid in your tech: $err"
-  }
-  _safeDestroy $_t
-
-  lassign [_parseReportByRow $::REPORT_FILE] approachArr strapsArr
-  array set rowApproach $approachArr
-  array set rowStraps   $strapsArr
-
-  # de-dup map per run
-  catch {unset ::_seenStraps}
-  array set ::_seenStraps {}
-
-  set kept 0
-  set deleted 0
-  set warn 0
-  set contaminated 0
-
-  foreach ridx [lsort -integer [array names rowStraps]] {
-    set approach "UNKNOWN"
-    if {[info exists rowApproach($ridx)]} { set approach $rowApproach($ridx) }
-
-    # EDGE rows => skip
-    if {[string match "EDGE*" $approach] || $approach eq "EDGE"} {
-      puts "ROW $ridx: approach=$approach => SKIP (manual placement)"
-      continue
-    }
-
-    set straps [_sortStrapsByOffAsc $rowStraps($ridx)]
-    set n [llength $straps]
-    if {$n == 0} continue
-
-    set topN 3
-    if {$n < 3} { set topN $n }
-    set botN 3
-    if {$n < 3} { set botN $n }
-
-    set top3 [lrange $straps 0 [expr {$topN-1}]]
-    set bot3 [lrange $straps [expr {$n-$botN}] [expr {$n-1}]]
-
-    puts "ROW $ridx: approach=$approach straps=$n => TOP3=[llength $top3] BOT3=[llength $bot3]"
-
-    set usedTop {}
-    set usedBot {}
-
-    foreach groupName {TOP3 BOT3} {
-      if {$groupName eq "TOP3"} {
-        set groupList $top3
-      } else {
-        set groupList $bot3
-      }
-
-      foreach strap $groupList {
-        # de-dup if top3/bot3 overlap (n<6)
-        set strapKey "[dict get $strap xll],[dict get $strap yll],[dict get $strap xur],[dict get $strap yur]"
-        if {[info exists ::_seenStraps($ridx,$strapKey)]} {
-          continue
-        }
-        set ::_seenStraps($ridx,$strapKey) 1
-
-        set xll [dict get $strap xll]
-        set yll [dict get $strap yll]
-        set xur [dict get $strap xur]
-        set yur [dict get $strap yur]
-
-        set strapObj [_findStrapRectByBBox $design $::LPP_M2 $xll $yll $xur $yur]
-        if {$strapObj eq ""} {
-          incr warn
-          puts "WARN: ROW $ridx $groupName strap BB=($xll $yll)-($xur $yur) not found; skipping."
-          continue
-        }
-
-        if {$groupName eq "TOP3"} {
-          set used $usedTop
+        if {$hasNet} {
+            set topOff $top3_a1
+            set botOff $bot3_a1
         } else {
-          set used $usedBot
+            set topOff $top3_a2
+            set botOff $bot3_a2
         }
 
-        # MODIFIED: Pass strapObj by reference so it can be recreated
-        lassign [_findUniqueSeedOnStrap $design $strap $approach $groupName $used strapObj] status seedNet seedX
-        
-        if {$status ne "OK"} {
-          puts "  DELETE: ROW $ridx $groupName no unique net found on strap BB=($xll $yll)-($xur $yur)"
-          _safeDestroy $strapObj
-          incr deleted
-          continue
+        # ---------------------------
+        # Process 6 straps per row
+        # 3 using topOff, 3 using botOff
+        # ---------------------------
+        for {set group 0} {$group < 2} {incr group} {
+            set off [expr {$group==0 ? $topOff : $botOff}]
+            set list_names {}   ;# uniqueness per group-of-3 (optional)
+
+            for {set m 0} {$m < 3} {incr m} {
+                if {$metal_idx >= $total} break
+
+                set rec   [lindex $sortedMetals $metal_idx]
+                set mObj  [lindex $rec 0]
+                set x_ur  [lindex $rec 1]
+                set y_avg [lindex $rec 2]
+                set x_ll  [lindex $rec 3]
+
+                # Start point
+                set x [expr {$x_ur - $off}]
+                set named 0
+
+                # Try initial and then shift left by 0.074 until x_ll
+                while {$x >= $x_ll} {
+                    set v [le::createVia -design [ed] -definition $VIA12_DEF -origin [list $x $y_avg] -orient R0]
+
+                    set netObj ""
+                    if {![catch {set netObj [db::getAttr net -of $v]}] && $netObj ne ""} {
+                        # optional uniqueness by net name
+                        set netName ""
+                        catch {set netName [db::getAttr name -of $netObj]}
+
+                        if {$netName eq "" || [lsearch -exact $list_names $netName] < 0} {
+                            # Assign the net to the METAL STRAP
+                            catch {db::setAttr net -of $mObj -value $netObj}
+                            if {$netName ne ""} { lappend list_names $netName }
+                            set named 1
+                            catch {db::destroy $v}   ;# delete via (probe only)
+                            break
+                        }
+                    }
+
+                    # delete via (probe only) and move
+                    catch {db::destroy $v}
+                    set x [expr {$x - 0.074}]
+                }
+
+                 if {!$named} { catch {db::destroy $mObj} }
+
+                incr metal_idx
+            }
         }
-
-        puts "  ACCEPT: ROW $ridx $groupName net=$seedNet seedX=$seedX BB=($xll $yll)-($xur $yur)"
-        
-        _placeAutoViasAlongStrap $design $strap $seedX $seedNet
-
-        if {$groupName eq "TOP3"} {
-          lappend usedTop $seedNet
-        } else {
-          lappend usedBot $seedNet
-        }
-
-        incr kept
-      }
     }
-  }
-
-  puts "DONE: keptStraps=$kept deletedStraps=$deleted warns=$warn"
 }
 
-# Run
-run_m2_grid_dynamic_autovia
+proc _netname {lpp} {
+    set v [db::getShapes -of [ed] -lpp $lpp -filter {%type=="Rect"}]
+    set names {}
+
+    db::foreach shape $v {
+        if {![catch {set n [db::getAttr net.name -of $shape]}]} {
+            lappend names $n
+        }
+    }
+
+    return $names
+}
+
+
+set sortedBbox [_getShapesBbox $lpp]
+set sorted [_sortedMetals $sortedBbox]
+set rows [_sortedRows $filepath]
+_createVia_search $rows  $sorted $VIA12_DEF
+set bBox [db::getAttr bBox -of $design]
+de::select [db::getShapes -of [ed]]
+le::autoVia -box $bBox -design $design
+

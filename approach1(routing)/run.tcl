@@ -1,0 +1,9 @@
+source /home/users/svgplayout2601mofikry/gonna_work/1_st_script.tcl
+source /home/users/svgplayout2601mofikry/gonna_work/metal_2_script.tcl
+source /home/users/svgplayout2601mofikry/gonna_work/via12_gonna_work.tcl
+source /home/users/svgplayout2601mofikry/gonna_work/taps.tcl
+source /home/users/svgplayout2601mofikry/gonna_work/metal_2_location.tcl
+source /home/users/svgplayout2601mofikry/gonna_work/m3_script.tcl
+source /home/users/svgplayout2601mofikry/gonna_work/via23_gonna_work.tcl
+source /home/users/svgplayout2601mofikry/gonna_work/1_st_script.tcl
+source /home/users/svgplayout2601mofikry/gonna_work/pin_generate.tcl
