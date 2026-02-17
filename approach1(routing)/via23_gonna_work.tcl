@@ -1,3 +1,5 @@
+set VIA_LPP {VIA2 drawing}
+set square 0.03
 # ----------------------------
 # USER SETTINGS
 # ----------------------------
@@ -35,8 +37,21 @@ proc place_via23_from_files {} {
             # Find the corresponding M3 for this net
             if {[dict exists $m3_data $net]} {
                 set m3_coords [dict get $m3_data $net]
-                set m3_xll [lindex $m3_coords 0]
-                set m3_xur [lindex $m3_coords 1]
+
+                set m3_xll_orig [lindex $m3_coords 0]
+                set m3_xur_orig [lindex $m3_coords 1]
+
+                set g 0.001   ;# replace with your real grid if known
+
+                set xc [expr {ceil((($m3_xll_orig + $m3_xur_orig)/2.0) / $g) * $g}]
+                set yc [expr {ceil((($m2_yll + $m2_yur)/2.0) / $g) * $g}]
+
+                set half [expr {$::square/2.0}]
+
+                set m3_xll [expr {$xc - $half}]
+                set m3_xur [expr {$xc + $half}]
+                set m2_yll [expr {$yc - $half}]
+                set m2_yur [expr {$yc + $half}]
 
                 # The Intersection Box:
                 # X comes from M3 (Vertical pillar width)
@@ -45,14 +60,7 @@ proc place_via23_from_files {} {
 
                 # Call AutoVia
                 puts "Placing Via23 for Net: $net at Box: $bBox"
-                if {[catch {
-                    le::autoVia -box $bBox \
-                                -design $design \
-                                -nets $net \
-                                -sameNetOnly true \
-                                -fitToOverlappedArea false \
-                                -allowStackedVia true
-                } err]} {
+                if {[catch {[le::createRectangle $bBox -design $design -lpp $::VIA_LPP ]} err]} {
                     puts "WARN: Failed to place via for $net: $err"
                 } else {
                     incr via_count
@@ -67,3 +75,4 @@ proc place_via23_from_files {} {
 
 # Run it
 place_via23_from_files
+

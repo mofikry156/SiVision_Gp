@@ -154,6 +154,8 @@ proc _createVia_search {rows sortedMetals VIA12_DEF} {
                     # delete via (probe only) and move
                     catch {db::destroy $v}
                     set x [expr {$x - 0.074}]
+                    db::setAttr net -of $mObj -value {}
+
                 }
 
                  if {!$named} { catch {db::destroy $mObj} }

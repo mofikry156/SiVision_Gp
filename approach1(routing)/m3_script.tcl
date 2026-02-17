@@ -1,5 +1,5 @@
 ########################################################################
-# place_m3_by_unique_nets_from_m2_txt.tcl
+# place_m3_by_unique_nets_from_m2_txt.tcl  (EDITED: always full OTA height)
 #
 # INPUT:
 #   IN_M2_FILE: formatted txt like:
@@ -13,25 +13,15 @@
 # OUTPUT:
 #   OUT_M3_FILE: formatted txt listing created M3 rectangles
 #
-# PLACEMENT RULES:
-#   - One M3 per UNIQUE net (remove duplicates: vdd!,vdd!,vdd! => one).
-#   - Compute total M2 width from global min(XLL) and max(XUR).
-#   - Horizontal spacing dx = M2_width / numUniqueNets.
-#   - Assign each net a unique Xc = XLL_min + (k+0.5)*dx.
-#   - M3 height per net:
-#       * If net occurs >1: span = [min(YLL) .. max(YUR)]
-#       * If net occurs 1:  stub around YC with SINGLE_NET_STUB_H
-#   - SPECIAL MIN-LEN RULE:
-#       * If computed M3 length < MIN_M3_LEN:
-#           - if net occurs >1  => force length = FORCED_M3_LEN_MULTI
-#           - if net occurs ==1 => force length = FORCED_M3_LEN_SINGLE
-#       * Forced length is centered around the original (y1..y2) midpoint.
-#
-# NEW RULE (your latest):
-#   - For any net whose name does NOT contain substring NET_SUBSTRING (default "net"):
-#       * Try to extend the M3 vertically toward the nearer OTA edge (top or bottom)
-#       * Only apply if resulting length <= MAX_M3_EXTENDED_LEN (default 2.7)
-#       * If extension would exceed MAX_M3_EXTENDED_LEN, keep original (y1..y2)
+# PLACEMENT RULES (edited):
+#   - One M3 per UNIQUE net (remove duplicates)
+#   - Compute total M2 width from global min(XLL) and max(XUR)
+#   - Horizontal spacing dx = M2_width / numUniqueNets
+#   - Assign each net a unique Xc = XLL_min + (k+0.5)*dx
+#   - IMPORTANT CHANGE:
+#       * ALL M3 pillars span the FULL OTA height:
+#           y1 = otaYBL, y2 = otaYTR
+#       * Removed stub/multi-span/min-length/extension logic
 ########################################################################
 
 # ----------------------------
@@ -47,37 +37,16 @@ set IN_OTA_FILE "/home/users/svgplayout2601mofikry/gonna_work/1st_script_op.txt"
 set LPP_M3 {M3 drawing}
 
 # Width of each M3 pillar (absolute, in X)
-set M3_WIDTH 0.034
-
-# Optional extra margin on top/bottom of M3 (helps guarantee overlap)
-set M3_MARGIN_Y 0.000
-
-# If a net appears only once, create a "stub" height around that one stripe:
-# total stub height = SINGLE_NET_STUB_H (centered on that stripe's YC)
-set SINGLE_NET_STUB_H 0.080
+set M3_WIDTH 0.04
 
 # Skip nets named NO_NET if present
 set SKIP_NO_NET 1
-
-# ---- MIN-LENGTH POLICY ----
-# If computed M3 length < MIN_M3_LEN:
-#   - multi-occ net: force length FORCED_M3_LEN_MULTI
-#   - single-occ net: force length FORCED_M3_LEN_SINGLE
-set MIN_M3_LEN            0.15
-set FORCED_M3_LEN_SINGLE  0.02
-set FORCED_M3_LEN_MULTI   0.45
-
-# ---- OTA EDGE EXTENSION POLICY (ONLY for nets NOT containing NET_SUBSTRING) ----
-# If net name does NOT contain NET_SUBSTRING:
-#   - extend toward nearer OTA edge (top/bottom) if resulting length <= MAX_M3_EXTENDED_LEN
-#   - otherwise keep original y-span
-set NET_SUBSTRING         "net"
-set MAX_M3_EXTENDED_LEN   2.7
 
 # ----------------------------
 # HELPERS
 # ----------------------------
 proc isNumber {s} {
+    # supports regular decimals only (matches your file format)
     return [regexp {^[+-]?([0-9]+(\.[0-9]*)?|\.[0-9]+)$} $s]
 }
 
@@ -171,18 +140,15 @@ proc place_m3_by_unique_nets_from_m2_txt {} {
         error "Parsed 0 records from IN_M2_FILE. Check file formatting."
     }
 
-    # Read OTA bbox Y edges
+    # Read OTA bbox Y edges (FULL HEIGHT TARGET)
     lassign [_readOtaBBox $::IN_OTA_FILE] otaYBL otaYTR
+    if {$otaYTR <= $otaYBL} {
+        error "Invalid OTA Y span parsed: otaYBL=$otaYBL otaYTR=$otaYTR"
+    }
 
     # Global X span of M2 metals
     set xllMin ""
     set xurMax ""
-
-    # Per-net stats
-    array set ymin {}
-    array set ymax {}
-    array set cnt  {}
-    array set yc1  {}
 
     # Unique nets in encounter order
     set uniqueNets {}
@@ -197,17 +163,6 @@ proc place_m3_by_unique_nets_from_m2_txt {} {
 
         if {[lsearch -exact $uniqueNets $net] == -1} {
             lappend uniqueNets $net
-        }
-
-        if {![info exists cnt($net)]} {
-            set cnt($net) 1
-            set ymin($net) $yll
-            set ymax($net) $yur
-            set yc1($net) $yc
-        } else {
-            incr cnt($net)
-            if {$yll < $ymin($net)} { set ymin($net) $yll }
-            if {$yur > $ymax($net)} { set ymax($net) $yur }
         }
     }
 
@@ -226,8 +181,7 @@ proc place_m3_by_unique_nets_from_m2_txt {} {
     set dx [expr {$m2Width / double($numNets)}]
 
     puts "INFO: Unique nets=$numNets  M2_width=$m2Width  dx_slot=$dx  Xspan=($xllMin .. $xurMax)"
-    puts "INFO: MIN_M3_LEN=$::MIN_M3_LEN  forced(single)=$::FORCED_M3_LEN_SINGLE  forced(multi)=$::FORCED_M3_LEN_MULTI"
-    puts "INFO: OTA_YBL=$otaYBL OTA_YTR=$otaYTR  NET_SUBSTRING=$::NET_SUBSTRING  MAX_M3_EXTENDED_LEN=$::MAX_M3_EXTENDED_LEN"
+    puts "INFO: FORCING FULL OTA HEIGHT: OTA_YBL=$otaYBL  OTA_YTR=$otaYTR"
 
     set fpOut [_openOutTxt $::OUT_M3_FILE]
 
@@ -238,58 +192,9 @@ proc place_m3_by_unique_nets_from_m2_txt {} {
         # Slot center X for this net
         set xc [expr {$xllMin + ($k + 0.5) * $dx}]
 
-        # Compute initial Y span for this net
-        if {[info exists cnt($net)] && $cnt($net) > 1} {
-            set y1 [expr {$ymin($net) - $::M3_MARGIN_Y}]
-            set y2 [expr {$ymax($net) + $::M3_MARGIN_Y}]
-        } else {
-            set halfH [expr {$::SINGLE_NET_STUB_H / 2.0}]
-            set yCenter $yc1($net)
-            set y1 [expr {$yCenter - $halfH}]
-            set y2 [expr {$yCenter + $halfH}]
-        }
-
-        # ---- Enforce min-length rule (as you had) ----
-        set curLen [expr {$y2 - $y1}]
-        if {$curLen < $::MIN_M3_LEN} {
-            set yCenter [expr {($y1 + $y2) / 2.0}]
-            if {[info exists cnt($net)] && $cnt($net) > 1} {
-                set halfForced [expr {$::FORCED_M3_LEN_MULTI / 2.0}]
-            } else {
-                set halfForced [expr {$::FORCED_M3_LEN_SINGLE / 2.0}]
-            }
-            set y1 [expr {$yCenter - $halfForced}]
-            set y2 [expr {$yCenter + $halfForced}]
-        }
-
-        # ---- NEW: OTA edge extension for nets that do NOT contain NET_SUBSTRING ----
-        # Try to extend toward nearer OTA edge (top/bottom) if resulting length <= MAX_M3_EXTENDED_LEN
-        if {[string first $::NET_SUBSTRING $net] == -1} {
-            set yMid [expr {($y1 + $y2) / 2.0}]
-            set dBot [expr {abs($yMid - $otaYBL)}]
-            set dTop [expr {abs($yMid - $otaYTR)}]
-
-            set newY1 $y1
-            set newY2 $y2
-
-            if {$dBot <= $dTop} {
-                # extend downward to bottom edge, keep upper end fixed
-                set newY1 $otaYBL
-                set newY2 $y2
-            } else {
-                # extend upward to top edge, keep lower end fixed
-                set newY1 $y1
-                set newY2 $otaYTR
-            }
-
-            set newLen [expr {$newY2 - $newY1}]
-            if {$newLen > 0.0 && $newLen <= $::MAX_M3_EXTENDED_LEN} {
-                set y1 $newY1
-                set y2 $newY2
-            } else {
-                # Too tall or invalid: keep the original (y1,y2)
-            }
-        }
+        # ALWAYS span full OTA height
+        set y1 $otaYBL
+        set y2 $otaYTR
 
         # M3 rectangle box
         set halfW [expr {$::M3_WIDTH / 2.0}]
@@ -313,8 +218,8 @@ proc place_m3_by_unique_nets_from_m2_txt {} {
     }
 
     puts $fpOut ""
-    puts $fpOut [format "SUMMARY: created=%d uniqueNets=%d M2width=%.6f dxSlot=%.6f MIN_M3_LEN=%.6f forced(single)=%.6f forced(multi)=%.6f OTA_YBL=%.6f OTA_YTR=%.6f NET_SUBSTRING=%s MAX_M3_EXTENDED_LEN=%.6f" \
-        $created $numNets $m2Width $dx $::MIN_M3_LEN $::FORCED_M3_LEN_SINGLE $::FORCED_M3_LEN_MULTI $otaYBL $otaYTR $::NET_SUBSTRING $::MAX_M3_EXTENDED_LEN]
+    puts $fpOut [format "SUMMARY: created=%d uniqueNets=%d M2width=%.6f dxSlot=%.6f OTA_YBL=%.6f OTA_YTR=%.6f M3_WIDTH=%.6f" \
+        $created $numNets $m2Width $dx $otaYBL $otaYTR $::M3_WIDTH]
     close $fpOut
 
     puts "DONE: created $created M3 rectangles. Output coords: $::OUT_M3_FILE"
@@ -322,4 +227,3 @@ proc place_m3_by_unique_nets_from_m2_txt {} {
 
 # Run
 place_m3_by_unique_nets_from_m2_txt
-

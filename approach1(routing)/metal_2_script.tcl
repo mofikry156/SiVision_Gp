@@ -34,26 +34,30 @@
 set inFile  "/home/users/svgplayout2601mofikry/gonna_work/1st_script_op.txt"
 set outFile "/home/users/svgplayout2601mofikry/gonna_work/m2_grid_report.txt"
 
-set strapHeight 0.03
+set strapHeight 0.035
 set rowTol      0.01
 set xInset      0.080
 set endOffset   0.080
 
 # FIRST approach offsets (use when probe RETURNS a net)
-set FIRST_OFFSETS  [list 0.116 0.190 0.253 0.391 0.449 0.510]
+set FIRST_OFFSETS  [list 0.1035 0.20 0.2655 0.3885 0.453 0.5245]
+
+
 
 # SECOND approach offsets (use when probe returns NO net)
-set SECOND_OFFSETS [list 0.059 0.118 0.178 0.309 0.377 0.458]
+set SECOND_OFFSETS [list 0.0565 0.118 0.183 0.304 0.377 0.463]
+
+
 
 # ----------------------------
 # NEW: X inset per strap index (0..5)
 # ----------------------------
 # Approach1: reference is strap0 (first) => inset[0]=0
 # refrence here is the first strap
-set A1_XINSETS [list 0.0 0.222 0.296 0.0 0.148 0.222] 
+set A1_XINSETS [list 0.0 0.075 0.148 0.0 0.148 0.222] 
 
 # refrence here is the 4th strap
-set A2_XINSETS [list 0.0 0.148 0.222 0.0 0.222 0.296] 
+set A2_XINSETS [list 0.0 0.075 0.148 0.0 0.075 0.149]
 
 # Probe config (3rd strap => index 2)
 set PROBE_OFFSET_IDX 2
