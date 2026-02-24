@@ -1,27 +1,15 @@
 ########################################################################
-# place_m3_by_unique_nets_from_m2_txt.tcl  (EDITED: always full OTA height)
+# place_m3_by_unique_nets_from_m2_txt.tcl
+# (FULL OTA height + detect power/ground + distributed over overlap span)
 #
-# INPUT:
-#   IN_M2_FILE: formatted txt like:
-#     IDX NET XLL YLL XUR YUR YC
-#   (header lines + dashed line + SUMMARY)
+# Pattern: signal, power, ground, signal, power, ground, ...
+# Gap rule: gap >= MIN_M3_GAP, and if more space exists, distribute it (bigger gap)
 #
-#   IN_OTA_FILE: your "1_st_op" txt containing:
-#     # OTA_BOTTOM_LEFT = (x, y)
-#     # OTA_TOP_RIGHT   = (x, y)
-#
-# OUTPUT:
-#   OUT_M3_FILE: formatted txt listing created M3 rectangles
-#
-# PLACEMENT RULES (edited):
-#   - One M3 per UNIQUE net (remove duplicates)
-#   - Compute total M2 width from global min(XLL) and max(XUR)
-#   - Horizontal spacing dx = M2_width / numUniqueNets
-#   - Assign each net a unique Xc = XLL_min + (k+0.5)*dx
-#   - IMPORTANT CHANGE:
-#       * ALL M3 pillars span the FULL OTA height:
-#           y1 = otaYBL, y2 = otaYTR
-#       * Removed stub/multi-span/min-length/extension logic
+# IMPORTANT (final clarified requirement):
+#   - M2 is horizontal, M3 pillars vertical.
+#   - Start of M3 grid X-span = MAX XLL among M2 metals  (ignore deep-left outliers)
+#   - End   of M3 grid X-span = MIN XUR among M2 metals  (ignore deep-right outliers)
+#   => This gives the COMMON OVERLAP WINDOW in X.
 ########################################################################
 
 # ----------------------------
@@ -29,15 +17,17 @@
 # ----------------------------
 set IN_M2_FILE  "/home/users/svgplayout2601mofikry/gonna_work/current_m2_metals_with_nets.txt"
 set OUT_M3_FILE "/home/users/svgplayout2601mofikry/gonna_work/m3_coords.txt"
-
-# OTA bbox source (your "1_st_op" txt)
 set IN_OTA_FILE "/home/users/svgplayout2601mofikry/gonna_work/1st_script_op.txt"
 
-# M3 layer
+# Create pillars on M3
 set LPP_M3 {M3 drawing}
 
-# Width of each M3 pillar (absolute, in X)
-set M3_WIDTH 0.04
+# Use M2 shapes in the DB for segType/sigType classification
+set LPP_M2 {M2 drawing}
+
+# Pillar width and minimum allowed gap between adjacent pillars (edge-to-edge)
+set M3_WIDTH   0.04
+set MIN_M3_GAP 0.026
 
 # Skip nets named NO_NET if present
 set SKIP_NO_NET 1
@@ -46,7 +36,6 @@ set SKIP_NO_NET 1
 # HELPERS
 # ----------------------------
 proc isNumber {s} {
-    # supports regular decimals only (matches your file format)
     return [regexp {^[+-]?([0-9]+(\.[0-9]*)?|\.[0-9]+)$} $s]
 }
 
@@ -70,8 +59,6 @@ proc _readM2DumpFile {fname} {
         if {[string match "-----*" $line]} { continue }
         if {[string match "SUMMARY:*" $line]} { continue }
 
-        # Data line format:
-        # idx net xll yll xur yur yc
         if {[regexp {^\s*([0-9]+)\s+(\S+)\s+([-\d\.]+)\s+([-\d\.]+)\s+([-\d\.]+)\s+([-\d\.]+)\s+([-\d\.]+)\s*$} \
                 $line -> idx net xll yll xur yur yc]} {
 
@@ -88,15 +75,14 @@ proc _readM2DumpFile {fname} {
 
 proc _openOutTxt {fname} {
     set fp [open $fname w]
-    puts $fp [format "%-6s %-24s %12s %12s %12s %12s %12s %12s %10s" \
-        "IDX" "NET" "XLL" "YLL" "XUR" "YUR" "Xc" "Yspan" "dxSlot"]
-    puts $fp [string repeat "-" 130]
+    puts $fp [format "%-6s %-24s %12s %12s %12s %12s %12s %12s %10s %10s" \
+        "IDX" "NET" "XLL" "YLL" "XUR" "YUR" "Xc" "Yspan" "pitch" "gap"]
+    puts $fp [string repeat "-" 150]
     return $fp
 }
 
-proc _readOtaBBox {fname} {
-    # Parses OTA_BOTTOM_LEFT and OTA_TOP_RIGHT from your 1_st_op file.
-    # Returns list: {otaYBL otaYTR}
+proc _readOtaBBoxY {fname} {
+    # Returns {otaYBL otaYTR}
     if {![file exists $fname]} {
         error "IN_OTA_FILE not found: $fname"
     }
@@ -105,9 +91,6 @@ proc _readOtaBBox {fname} {
     set yTR ""
     while {[gets $fp line] >= 0} {
         set line [string trim $line]
-        # Example lines:
-        # # OTA_BOTTOM_LEFT = (0.483, -2.423)
-        # # OTA_TOP_RIGHT   = (3.367, 1.953)
         if {[regexp {OTA_BOTTOM_LEFT\s*=\s*\(\s*([-\d\.]+)\s*,\s*([-\d\.]+)\s*\)} $line -> x y]} {
             set yBL $y
         }
@@ -121,6 +104,36 @@ proc _readOtaBBox {fname} {
         error "Failed to parse OTA_BOTTOM_LEFT / OTA_TOP_RIGHT Y from: $fname"
     }
     return [list $yBL $yTR]
+}
+
+proc _classifyNetFromShapes {design net lpp} {
+    # Returns: "power" | "ground" | "signal" | "unknown"
+    set shapes {}
+    catch { set shapes [db::getShapes -of $design -lpp $lpp] }
+
+    if {[llength $shapes] == 0} {
+        return "unknown"
+    }
+
+    db::foreach sh $shapes {
+        set shNet ""
+        catch { set shNet [db::getAttr net.name -of $sh] }
+        if {$shNet ne $net} { continue }
+
+        set t ""
+        catch { set t [db::getAttr net.segType -of $sh] }
+        if {$t eq ""} {
+            catch { set t [db::getAttr net.sigType -of $sh] }
+        }
+
+        set t [string tolower [string trim $t]]
+        if {$t ne ""} {
+            if {[string match "*power*"  $t]} { return "power"  }
+            if {[string match "*ground*" $t]} { return "ground" }
+            if {[string match "*signal*" $t]} { return "signal" }
+        }
+    }
+    return "unknown"
 }
 
 # ----------------------------
@@ -140,17 +153,19 @@ proc place_m3_by_unique_nets_from_m2_txt {} {
         error "Parsed 0 records from IN_M2_FILE. Check file formatting."
     }
 
-    # Read OTA bbox Y edges (FULL HEIGHT TARGET)
-    lassign [_readOtaBBox $::IN_OTA_FILE] otaYBL otaYTR
+    # FULL OTA height
+    lassign [_readOtaBBoxY $::IN_OTA_FILE] otaYBL otaYTR
     if {$otaYTR <= $otaYBL} {
         error "Invalid OTA Y span parsed: otaYBL=$otaYBL otaYTR=$otaYTR"
     }
 
-    # Global X span of M2 metals
-    set xllMin ""
-    set xurMax ""
-
-    # Unique nets in encounter order
+    # ------------------------------------------------------------
+    # Unique nets + compute OVERLAP X window from M2 dump:
+    #   xStart = MAX XLL  (ignore deep-left)
+    #   xEnd   = MIN XUR  (ignore deep-right)
+    # ------------------------------------------------------------
+    set xStart ""   ;# max XLL
+    set xEnd ""     ;# min XUR
     set uniqueNets {}
 
     foreach r $recs {
@@ -158,46 +173,123 @@ proc place_m3_by_unique_nets_from_m2_txt {} {
 
         if {$::SKIP_NO_NET && $net eq "NO_NET"} { continue }
 
-        if {$xllMin eq "" || $xll < $xllMin} { set xllMin $xll }
-        if {$xurMax eq "" || $xur > $xurMax} { set xurMax $xur }
+        if {$xStart eq "" || $xll > $xStart} { set xStart $xll }
+        if {$xEnd   eq "" || $xur < $xEnd}   { set xEnd   $xur }
 
         if {[lsearch -exact $uniqueNets $net] == -1} {
             lappend uniqueNets $net
         }
     }
 
-    set numNets [llength $uniqueNets]
-    if {$numNets == 0} {
+    if {[llength $uniqueNets] == 0} {
         error "No nets found (after SKIP_NO_NET filtering)."
     }
-    if {$xllMin eq "" || $xurMax eq ""} {
-        error "Failed to compute global X span."
+    if {$xStart eq "" || $xEnd eq ""} {
+        error "Failed to compute overlap X window (xStart/xEnd)."
     }
 
-    set m2Width [expr {$xurMax - $xllMin}]
-    if {$m2Width <= 0.0} {
-        error "Invalid M2 width computed: $m2Width"
+    set span [expr {$xEnd - $xStart}]
+    if {$span <= 0.0} {
+        error "No common overlap X region: xStart(maxXLL)=$xStart  xEnd(minXUR)=$xEnd  span=$span"
     }
-    set dx [expr {$m2Width / double($numNets)}]
 
-    puts "INFO: Unique nets=$numNets  M2_width=$m2Width  dx_slot=$dx  Xspan=($xllMin .. $xurMax)"
-    puts "INFO: FORCING FULL OTA HEIGHT: OTA_YBL=$otaYBL  OTA_YTR=$otaYTR"
+    # ------------------------------------------------------------
+    # Classify nets into signal / power / ground (from DB M2 shapes)
+    # ------------------------------------------------------------
+    set sigNets {}
+    set pwrNets {}
+    set gndNets {}
+
+    foreach net $uniqueNets {
+        set t [_classifyNetFromShapes $design $net $::LPP_M2]
+        if {$t eq "power"} {
+            lappend pwrNets $net
+        } elseif {$t eq "ground"} {
+            lappend gndNets $net
+        } else {
+            lappend sigNets $net
+        }
+    }
+
+    # ------------------------------------------------------------
+    # Build order: signal, power, ground, ...
+    # ------------------------------------------------------------
+    set orderedNets {}
+    set ip 0
+    set ig 0
+    set np [llength $pwrNets]
+    set ng [llength $gndNets]
+
+    foreach s $sigNets {
+        lappend orderedNets $s
+        if {$np > 0} {
+            lappend orderedNets [lindex $pwrNets $ip]
+            set ip [expr {($ip + 1) % $np}]
+        }
+        if {$ng > 0} {
+            lappend orderedNets [lindex $gndNets $ig]
+            set ig [expr {($ig + 1) % $ng}]
+        }
+    }
+
+    # If no signals exist, just alternate pwr/gnd
+    if {[llength $orderedNets] == 0} {
+        set i 0
+        while {$i < [expr {max($np,$ng)}]} {
+            if {$np > 0} { lappend orderedNets [lindex $pwrNets [expr {$i % $np}]] }
+            if {$ng > 0} { lappend orderedNets [lindex $gndNets [expr {$i % $ng}]] }
+            incr i
+        }
+    }
+
+    set uniqueNets $orderedNets
+    set N [llength $uniqueNets]
+    if {$N == 0} { error "After ordering, nothing to place." }
+
+    # ------------------------------------------------------------
+    # Distribute across overlap span with minimum gap
+    # ------------------------------------------------------------
+    set W $::M3_WIDTH
+    set minGap $::MIN_M3_GAP
+    set halfW [expr {$W/2.0}]
+
+    if {$N == 1} {
+        set gapUsed 0.0
+        set pitch 0.0
+        set startXc [expr {$xStart + $span/2.0}]
+    } else {
+        set idealGap [expr {($span - $N*$W)/double($N-1)}]
+        set gapUsed $idealGap
+
+        if {$gapUsed < $minGap} {
+            set gapUsed $minGap
+            puts "WARN: Cannot fit N=$N pillars with W=$W and minGap=$minGap inside overlap span=$span."
+            puts "WARN: Using gap=$gapUsed anyway; grid may extend past xEnd."
+        }
+
+        set pitch [expr {$W + $gapUsed}]
+        set startXc [expr {$xStart + $halfW}]   ;# start at xStart (maxXLL)
+    }
+
+    puts "INFO: M2 overlap X-window: xStart(maxXLL)=$xStart  xEnd(minXUR)=$xEnd  span=$span"
+    puts "INFO: N=$N  M3_WIDTH=$W  minGap=$minGap  gapUsed=$gapUsed  pitch=$pitch"
+    puts "INFO: FULL OTA HEIGHT: OTA_YBL=$otaYBL OTA_YTR=$otaYTR"
 
     set fpOut [_openOutTxt $::OUT_M3_FILE]
 
     set created 0
-    for {set k 0} {$k < $numNets} {incr k} {
+    for {set k 0} {$k < $N} {incr k} {
         set net [lindex $uniqueNets $k]
 
-        # Slot center X for this net
-        set xc [expr {$xllMin + ($k + 0.5) * $dx}]
+        if {$N == 1} {
+            set xc $startXc
+        } else {
+            set xc [expr {$startXc + $k*$pitch}]
+        }
 
-        # ALWAYS span full OTA height
         set y1 $otaYBL
         set y2 $otaYTR
 
-        # M3 rectangle box
-        set halfW [expr {$::M3_WIDTH / 2.0}]
         set m3_xll [expr {$xc - $halfW}]
         set m3_xur [expr {$xc + $halfW}]
         set m3_yll $y1
@@ -205,21 +297,19 @@ proc place_m3_by_unique_nets_from_m2_txt {} {
 
         set box [list [list $m3_xll $m3_yll] [list $m3_xur $m3_yur]]
 
-        set obj ""
-        if {[catch { set obj [le::createRectangle $box -design $design -lpp $::LPP_M3 -net $net] } err]} {
+        if {[catch { le::createRectangle $box -design $design -lpp $::LPP_M3 -net $net } err]} {
             puts "WARN: failed to create M3 for net=$net err=$err"
             continue
         }
 
         incr created
-
-        puts $fpOut [format "%-6d %-24s %12.6f %12.6f %12.6f %12.6f %12.6f %6.3f..%6.3f %10.6f" \
-            $created $net $m3_xll $m3_yll $m3_xur $m3_yur $xc $y1 $y2 $dx]
+        puts $fpOut [format "%-6d %-24s %12.6f %12.6f %12.6f %12.6f %12.6f %6.3f..%6.3f %10.6f %10.6f" \
+            $created $net $m3_xll $m3_yll $m3_xur $m3_yur $xc $y1 $y2 $pitch $gapUsed]
     }
 
     puts $fpOut ""
-    puts $fpOut [format "SUMMARY: created=%d uniqueNets=%d M2width=%.6f dxSlot=%.6f OTA_YBL=%.6f OTA_YTR=%.6f M3_WIDTH=%.6f" \
-        $created $numNets $m2Width $dx $otaYBL $otaYTR $::M3_WIDTH]
+    puts $fpOut [format "SUMMARY: created=%d orderedNets=%d span=%.6f M3_WIDTH=%.6f gapUsed=%.6f minGap=%.6f OTA_YBL=%.6f OTA_YTR=%.6f xStart(maxXLL)=%.6f xEnd(minXUR)=%.6f" \
+        $created $N $span $W $gapUsed $minGap $otaYBL $otaYTR $xStart $xEnd]
     close $fpOut
 
     puts "DONE: created $created M3 rectangles. Output coords: $::OUT_M3_FILE"

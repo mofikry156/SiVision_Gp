@@ -1,31 +1,9 @@
 ########################################################################
 # place_m2_grid_perCorner_probe3rdStrap_netSwitch_CREATEVIA_reportLikeOld.tcl
 #
-# Report format matches your OLD style:
-#   ROW i/n  TOP=...  off=...  Yc=...  BB=(x0 y0)-(x1 y1)
-#
-# PLUS: for every ROW, it prints which approach was chosen:
-#   # ROW i APPROACH=1  (probe net='...')
-# or
-#   # ROW i APPROACH=2  (probe net='')
-#
-# Logic (REVERSED as you asked):
-#   - For each MIDDLE row:
-#       Probe on the "3rd strap" location (offset index 2 of FIRST_OFFSETS)
-#       using le::createVia at (x1 - 0.009, yC), orient R90.
-#       If probe via has a net  -> use FIRST_OFFSETS  (APPROACH=1)
-#       Else                   -> use SECOND_OFFSETS (APPROACH=2)
-#   - First and last rows always use endOffset only (EDGE rows).
-#
-# NEW X-SHAPING (your request):
-#   - APPROACH1: reference strap is FIRST strap (index 0) => full length
-#       strap2 inset = 0.200 from BOTH left & right
-#       strap3 inset = 0.271 from BOTH left & right
-#       strap4 inset = 0.000 (as is)
-#       strap5 inset = 0.172
-#       strap6 inset = 0.241
-#   - APPROACH2: same idea but reference strap is LAST strap (index last)
-#       => mirrored inset list
+# NEW (YOUR REQUEST):
+#   - Remove strap #5 in APPROACH1  => index 4
+#   - Remove strap #3 in APPROACH2  => index 2
 ########################################################################
 
 # ----------------------------
@@ -34,30 +12,22 @@
 set inFile  "/home/users/svgplayout2601mofikry/gonna_work/1st_script_op.txt"
 set outFile "/home/users/svgplayout2601mofikry/gonna_work/m2_grid_report.txt"
 
-set strapHeight 0.035
+set strapHeight 0.036
 set rowTol      0.01
 set xInset      0.080
 set endOffset   0.080
 
 # FIRST approach offsets (use when probe RETURNS a net)
-set FIRST_OFFSETS  [list 0.1035 0.20 0.2655 0.3885 0.453 0.5245]
-
-
+set FIRST_OFFSETS  [list 0.0705 0.168 0.272 0.4005 0.498 0.5245]
 
 # SECOND approach offsets (use when probe returns NO net)
-set SECOND_OFFSETS [list 0.0565 0.118 0.183 0.304 0.377 0.463]
-
-
+set SECOND_OFFSETS [list 0.0723 0.168 0.183 0.304 0.402 0.503]
 
 # ----------------------------
-# NEW: X inset per strap index (0..5)
+# X inset per strap index (0..5)
 # ----------------------------
-# Approach1: reference is strap0 (first) => inset[0]=0
-# refrence here is the first strap
-set A1_XINSETS [list 0.0 0.075 0.148 0.0 0.148 0.222] 
-
-# refrence here is the 4th strap
-set A2_XINSETS [list 0.0 0.075 0.148 0.0 0.075 0.149]
+set A1_XINSETS [list 0.0 0.0 0 0.148 0.148 0.148]
+set A2_XINSETS [list 0.148 0.148 0.148 0.0 0.0 0]
 
 # Probe config (3rd strap => index 2)
 set PROBE_OFFSET_IDX 2
@@ -71,14 +41,20 @@ set VIA_ORIENT   R0
 set LPP_M2 {M2 drawing}
 
 # ----------------------------
+# STRAP REMOVAL 
+# ----------------------------
+# Remove 5th strap in APPROACH1 => index 4
+set REMOVE_A1_IDXS [list 5]
+# Remove 3rd strap in APPROACH2 => index 2
+set REMOVE_A2_IDXS [list 2]
+
+# ----------------------------
 # HELPERS
 # ----------------------------
 proc isNumber {s} { return [regexp {^[+-]?([0-9]+(\.[0-9]*)?|\.[0-9]+)$} $s] }
 proc quantKey {y tol} { return [expr {round($y / $tol) * $tol}] }
 
-
 proc deleteFig {fig} {
-
     catch { le::delete $fig }
 }
 
@@ -99,8 +75,6 @@ proc tryGetNetName {obj} {
     return $nm
 }
 
-
-# NEW: compute x-span for a strap index (j) based on approach
 proc strapXSpan {approach j x0base x1base} {
     set inset 0.0
 
@@ -119,7 +93,6 @@ proc strapXSpan {approach j x0base x1base} {
     set x0i [expr {$x0base + $inset}]
     set x1i [expr {$x1base - $inset}]
 
-    # Safety: if inset too large, fall back to full-length
     if {$x1i <= $x0i} {
         set x0i $x0base
         set x1i $x1base
@@ -127,7 +100,6 @@ proc strapXSpan {approach j x0base x1base} {
     return [list $x0i $x1i]
 }
 
-# Parse OTA + device rows (also returns parsed-good/bad like old script)
 proc parseDeviceFile {fname rowTol} {
     set fp [open $fname r]
 
@@ -186,7 +158,6 @@ proc run_place_m2_grid_perCorner_probe3rdStrap_reportLikeOld {} {
         error "Input file not found: $::inFile"
     }
 
-    
     set lppM2 {M2 drawing}
 
     lassign [parseDeviceFile $::inFile $::rowTol] otaLLX otaLLY otaURX otaURY rowMap good bad
@@ -207,7 +178,6 @@ proc run_place_m2_grid_perCorner_probe3rdStrap_reportLikeOld {} {
 
     set rp [open $::outFile "w"]
 
-    # --- Header like old report ---
     puts $rp "# place_m2_grid_from_bboxfile.tcl report (per-corner PROBE on 3rd strap, createVia, REVERSED)"
     puts $rp "# inFile=$::inFile"
     puts $rp "# otaLL=($otaLLX,$otaLLY) otaUR=($otaURX,$otaURY)"
@@ -222,12 +192,10 @@ proc run_place_m2_grid_perCorner_probe3rdStrap_reportLikeOld {} {
     puts $rp "# parsed good=$good bad=$bad rows=$nRows"
     puts $rp ""
 
-    # --- Rows ---
     for {set i 0} {$i < $nRows} {incr i} {
         set key  [lindex $keys $i]
         set topY $rowTopY($key)
 
-        # Decide offsets + record approach per row
         set approach "EDGE"
         set probeNet ""
 
@@ -235,13 +203,11 @@ proc run_place_m2_grid_perCorner_probe3rdStrap_reportLikeOld {} {
             set useOffsets [list $::endOffset]
             set approach "EDGE"
         } else {
-            # Probe at FIRST_OFFSETS[2]
             set probeOff [lindex $::FIRST_OFFSETS $::PROBE_OFFSET_IDX]
             set yC    [expr {$topY - $probeOff}]
             set y0_p  [expr {$yC - $::strapHeight/2.0}]
             set y1_p  [expr {$yC + $::strapHeight/2.0}]
 
-            # Probe strap (kept full length for probing)
             set probeStrap [createM2Strap $design $lppM2 $x0 $y0_p $x1 $y1_p]
 
             set probeX [expr {$x1 - $::PROBE_X_FROM_RIGHT}]
@@ -259,11 +225,9 @@ proc run_place_m2_grid_perCorner_probe3rdStrap_reportLikeOld {} {
                 set probeNet [tryGetNetName $vProbe]
             }
 
-            # cleanup probe objs
             deleteFig $vProbe
             deleteFig $probeStrap
 
-            # REVERSED decision:
             if {$probeNet ne ""} {
                 set useOffsets $::FIRST_OFFSETS
                 set approach "APPROACH1"
@@ -273,7 +237,6 @@ proc run_place_m2_grid_perCorner_probe3rdStrap_reportLikeOld {} {
             }
         }
 
-        # --- Per-row decision line ---
         if {$approach eq "EDGE"} {
             puts $rp [format "# ROW %d/%d  TOP=%.3f  APPROACH=EDGE (endOffset only)" \
                 $i [expr {$nRows-1}] $topY]
@@ -285,11 +248,26 @@ proc run_place_m2_grid_perCorner_probe3rdStrap_reportLikeOld {} {
         # Final strap placement + OLD-style rows in report
         set j 0
         foreach off $useOffsets {
+
+            # remove per approach:
+            # - APPROACH1: remove strap index 4 (5th strap)
+            # - APPROACH2: remove strap index 2 (3rd strap)
+            if {$approach eq "APPROACH1"} {
+                if {[lsearch -exact $::REMOVE_A1_IDXS $j] != -1} {
+                    incr j
+                    continue
+                }
+            } elseif {$approach eq "APPROACH2"} {
+                if {[lsearch -exact $::REMOVE_A2_IDXS $j] != -1} {
+                    incr j
+                    continue
+                }
+            }
+
             set yc_final [expr {$topY - $off}]
             set y0_f     [expr {$yc_final - $::strapHeight/2.0}]
             set y1_f     [expr {$yc_final + $::strapHeight/2.0}]
 
-            # NEW: per-strap X shaping
             lassign [strapXSpan $approach $j $x0 $x1] x0i x1i
 
             createM2Strap $design $lppM2 $x0i $y0_f $x1i $y1_f
@@ -300,7 +278,7 @@ proc run_place_m2_grid_perCorner_probe3rdStrap_reportLikeOld {} {
             incr j
         }
 
-        puts $rp ""  ;# blank line between rows
+        puts $rp ""
     }
 
     close $rp
